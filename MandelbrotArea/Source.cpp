@@ -57,7 +57,8 @@ static uint64_t timer_nsec() {
 
 using namespace std;
 
-const int maxIter = 1000;
+const int maxIter = 4000;
+const double expectedArea = 1.5065918849;
 
 int isInsideD(double * const __restrict cx, double * const __restrict cy) {
 	const __m256d c_re = _mm256_load_pd(cx);
@@ -148,10 +149,10 @@ int isInside(float * const  __restrict cx, float * const  __restrict cy) {
 }
 
 int main() {
-	const double CxMin=-2.5;
-	const double CxMax=1.5;
-	const double CyMin=-2.0;
-	const double CyMax=2.0;
+	const double CxMin=-10;
+	const double CxMax=10;
+	const double CyMin=-10.0;
+	const double CyMax=10.0;
 
 	const double width = CxMax - CxMin;
 	const double height = CyMax - CyMin;
@@ -174,7 +175,7 @@ int main() {
 	for (;;) {
 
 		t_start = timer_nsec();
-		for (uint64_t c = 0; c < 1 << 10; ++c) {
+		for (uint64_t c = 0; c < 1 << 20; ++c) {
 			double xs[4], ys[4];
 
 			for (int r = 0; r < 4; ++r) {
@@ -192,12 +193,11 @@ int main() {
 
 		// printf("batch time: %fms\n", double(t_end - t_start) * 1e-6);
 
-		const double abefore = area;
-		area = double(area) * 0.5 + (totalArea * (double(in_out[0]) / double(in_out[1]))) * 0.5;
-		printf("Total: %f dev %f in[%llu] out[%llu]\n", area, std::abs(abefore - area), in_out[1], in_out[0]);
+		area = totalArea * (double(in_out[0]) / double(in_out[1]));
+		printf("Total: %f dev %f in[%llu] out[%llu]\n", area, std::abs(expectedArea - area), in_out[1], in_out[0]);
 
 
-		if (std::abs(abefore - area) < 1e-6) {
+		if (std::abs(expectedArea - area) < 1e-9) {
 			break;
 		}
 
