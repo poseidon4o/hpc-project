@@ -1,10 +1,59 @@
 #include <random>
 #include <cstdint>
 #include <algorithm>
+#include <immintrin.h>
 
+using namespace std;
+
+#if __linux__ != 0
+#include <time.h>
+
+static uint64_t timer_nsec() {
+#if defined(CLOCK_MONOTONIC_RAW)
+	const clockid_t clockid = CLOCK_MONOTONIC_RAW;
+
+#else
+	const clockid_t clockid = CLOCK_MONOTONIC;
+
+#endif
+
+	timespec t;
+	clock_gettime(clockid, &t);
+
+	return t.tv_sec * 1000000000UL + t.tv_nsec;
+}
+
+#elif _WIN64 != 0
 #define NOMINMAX
-#define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
+
+static uint64_t timer_nsec() {
+
+	static LARGE_INTEGER freq;
+	static BOOL once = QueryPerformanceFrequency(&freq);
+
+	LARGE_INTEGER t;
+	QueryPerformanceCounter(&t);
+
+	return 1000000000ULL * t.QuadPart / freq.QuadPart;
+}
+
+#elif __APPLE__ != 0
+#include <mach/mach_time.h>
+
+static uint64_t timer_nsec() {
+
+    static mach_timebase_info_data_t tb;
+    if (0 == tb.denom)
+		mach_timebase_info(&tb);
+
+    const uint64_t t = mach_absolute_time();
+
+    return t * tb.numer / tb.denom;
+}
+
+#endif
+
 
 using namespace std;
 
@@ -21,7 +70,8 @@ int isInside(float * const  __restrict cx, float * const  __restrict cy) {
 	int resMask = 0;
 
 	for (int c = 0; c < 400 / 8; ++c) {
-		const __m256 fmad_x_c_re = _mm256_fmadd_ps(x, x, c_re);
+		const __m256 d_x = _mm256_mul_ps(x, x);
+		const __m256 fmad_x_c_re = _mm256_add_ps(d_x, c_re);
 		const __m256 m_yy = _mm256_mul_ps(y, y);
 		__m256 newX = _mm256_sub_ps(fmad_x_c_re, m_yy);
 		// float x_new = x*x - y*y + c_re;
@@ -34,7 +84,8 @@ int isInside(float * const  __restrict cx, float * const  __restrict cy) {
 		x = newX;
 
 		const __m256 m_yy2 = _mm256_mul_ps(y, y);
-		const __m256 fmad_x_m_yy2 = _mm256_fmadd_ps(x, x, m_yy2);
+		const __m256 d_x2 = _mm256_mul_ps(x, x);
+		const __m256 fmad_x_m_yy2 = _mm256_add_ps(d_x2, m_yy2);
 
 		const __m256 out = _mm256_cmp_ps(fmad_x_m_yy2, q_vec, _CMP_GT_OS);
 		result = _mm256_or_ps(result, out);
@@ -70,17 +121,14 @@ int main() {
 	uint64_t in_out[2] = {0, 0};
 	float area = 0;
 
-	double PCFreq = 0.0;
-	__int64 CounterStart = 0;
-
-	LARGE_INTEGER fr, start, end;
-	BOOL res = QueryPerformanceFrequency(&fr);
-	PCFreq = double(fr.QuadPart) / 1000.0;
-
 	double total = 1e99;
 
+	uint64_t t_start, t_end;
+
 	for (;;) {
-		for (uint64_t c = 0; c < 1 << 10; ++c) {
+
+		t_start = timer_nsec();
+		for (uint64_t c = 0; c < 1 << 15; ++c) {
 			float xs[8], ys[8];
 
 			for (int r = 0; r < 8; ++r) {
@@ -94,13 +142,17 @@ int main() {
 				in_out[(res >> r) & 0x1]++;
 			}
 		}
+		t_end = timer_nsec();
+
+		// printf("batch time: %fms\n", double(t_end - t_start) * 1e-6);
 
 		const float abefore = area;
 		area = double(area) * 0.5 + (totalArea * (double(in_out[0]) / double(in_out[1]))) * 0.5;
+		printf("Total: %f\n", area);
 
-		if (std::fabs(abefore - area) < 1e-4) {
-			break;
-		}
+		// if (std::fabs(abefore - area) < 1e-4) {
+		// 	break;
+		// }
 
 		in_out[0] = in_out[1] = 0;
 	}
