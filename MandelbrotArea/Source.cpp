@@ -57,6 +57,52 @@ static uint64_t timer_nsec() {
 
 using namespace std;
 
+const int maxIter = 1000;
+
+int isInsideD(double * const __restrict cx, double * const __restrict cy) {
+	const __m256d c_re = _mm256_load_pd(cx);
+	const __m256d c_im = _mm256_load_pd(cy);
+
+	const __m256d d_vec = _mm256_set_pd(2.f, 2.f, 2.f, 2.f);
+	const __m256d q_vec = _mm256_set_pd(4.f, 4.f, 4.f, 4.f);
+
+	__m256d result = _mm256_set_pd(0.f, 0.f, 0.f, 0.f);
+
+	__m256d x = _mm256_setzero_pd(), y = _mm256_setzero_pd();
+	int resMask = 0;
+
+	for (int c = 0; c < maxIter; ++c) {
+		const __m256d d_x = _mm256_mul_pd(x, x);
+		const __m256d fmad_x_c_re = _mm256_add_pd(d_x, c_re);
+		const __m256d m_yy = _mm256_mul_pd(y, y);
+		__m256d newX = _mm256_sub_pd(fmad_x_c_re, m_yy);
+		// float x_new = x*x - y*y + c_re;
+
+		const __m256d m_xy = _mm256_mul_pd(x, y);
+		const __m256d m_m_xy_d_vec = _mm256_mul_pd(m_xy, d_vec);
+		y = _mm256_add_pd(c_im, m_m_xy_d_vec);
+		// y = 2*x*y + c_im;
+
+		x = newX;
+
+		const __m256d m_yy2 = _mm256_mul_pd(y, y);
+		const __m256d d_x2 = _mm256_mul_pd(x, x);
+		const __m256d fmad_x_m_yy2 = _mm256_add_pd(d_x2, m_yy2);
+
+		const __m256d out = _mm256_cmp_pd(fmad_x_m_yy2, q_vec, _CMP_GT_OS);
+		result = _mm256_or_pd(result, out);
+		//if (x*x + y*y > 4.0)
+
+		resMask = _mm256_movemask_pd(result);
+
+		if (resMask == (1 << 4) - 1) {
+			return resMask;
+		}
+	}
+
+	return resMask;
+}
+
 int isInside(float * const  __restrict cx, float * const  __restrict cy) {
 	const __m256 c_re = _mm256_load_ps(cx);
 	const __m256 c_im = _mm256_load_ps(cy);
@@ -69,7 +115,7 @@ int isInside(float * const  __restrict cx, float * const  __restrict cy) {
 	__m256 x = _mm256_setzero_ps(), y = _mm256_setzero_ps();
 	int resMask = 0;
 
-	for (int c = 0; c < 400 / 8; ++c) {
+	for (int c = 0; c < maxIter; ++c) {
 		const __m256 d_x = _mm256_mul_ps(x, x);
 		const __m256 fmad_x_c_re = _mm256_add_ps(d_x, c_re);
 		const __m256 m_yy = _mm256_mul_ps(y, y);
@@ -102,24 +148,24 @@ int isInside(float * const  __restrict cx, float * const  __restrict cy) {
 }
 
 int main() {
-	const float CxMin=-2.5;
-	const float CxMax=1.5;
-	const float CyMin=-2.0;
-	const float CyMax=2.0;
+	const double CxMin=-2.5;
+	const double CxMax=1.5;
+	const double CyMin=-2.0;
+	const double CyMax=2.0;
 
-	const float width = CxMax - CxMin;
-	const float height = CyMax - CyMin;
+	const double width = CxMax - CxMin;
+	const double height = CyMax - CyMin;
 
 	random_device dev;
 	default_random_engine eng(dev());
 
-	uniform_real_distribution<float> widthDist(CxMin, CxMax);
-	uniform_real_distribution<float> heightDist(CyMin, CyMax);
+	uniform_real_distribution<double> widthDist(CxMin, CxMax);
+	uniform_real_distribution<double> heightDist(CyMin, CyMax);
 
 	const double totalArea = width * height;
 
 	uint64_t in_out[2] = {0, 0};
-	float area = 0;
+	double area = 0;
 
 	double total = 1e99;
 
@@ -128,17 +174,17 @@ int main() {
 	for (;;) {
 
 		t_start = timer_nsec();
-		for (uint64_t c = 0; c < 1 << 15; ++c) {
-			float xs[8], ys[8];
+		for (uint64_t c = 0; c < 1 << 10; ++c) {
+			double xs[4], ys[4];
 
-			for (int r = 0; r < 8; ++r) {
+			for (int r = 0; r < 4; ++r) {
 				xs[r] = widthDist(eng);
 				ys[r] = heightDist(eng);
 			}
 
-			int res = isInside(xs, ys);
+			int res = isInsideD(xs, ys);
 
-			for (int r = 0; r < 8; ++r) {
+			for (int r = 0; r < 4; ++r) {
 				in_out[(res >> r) & 0x1]++;
 			}
 		}
@@ -146,15 +192,16 @@ int main() {
 
 		// printf("batch time: %fms\n", double(t_end - t_start) * 1e-6);
 
-		const float abefore = area;
+		const double abefore = area;
 		area = double(area) * 0.5 + (totalArea * (double(in_out[0]) / double(in_out[1]))) * 0.5;
-		printf("Total: %f\n", area);
+		printf("Total: %f dev %f in[%llu] out[%llu]\n", area, std::abs(abefore - area), in_out[1], in_out[0]);
 
-		// if (std::fabs(abefore - area) < 1e-4) {
-		// 	break;
-		// }
 
-		in_out[0] = in_out[1] = 0;
+		if (std::abs(abefore - area) < 1e-6) {
+			break;
+		}
+
+		// in_out[0] = in_out[1] = 0;
 	}
 
 	printf("\nTotal: %f\n", area);
