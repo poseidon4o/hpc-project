@@ -63,10 +63,10 @@ int isInsideD(double * const __restrict cx, double * const __restrict cy) {
 	const __m256d c_re = _mm256_load_pd(cx);
 	const __m256d c_im = _mm256_load_pd(cy);
 
-	const __m256d d_vec = _mm256_set_pd(2.f, 2.f, 2.f, 2.f);
-	const __m256d q_vec = _mm256_set_pd(4.f, 4.f, 4.f, 4.f);
+	const __m256d d_vec = _mm256_set_pd(2., 2., 2., 2.);
+	const __m256d q_vec = _mm256_set_pd(4., 4., 4., 4.);
 
-	__m256d result = _mm256_set_pd(0.f, 0.f, 0.f, 0.f);
+	__m256d result = _mm256_set_pd(0., 0., 0., 0.);
 
 	__m256d x = _mm256_setzero_pd(), y = _mm256_setzero_pd();
 	int resMask = 0;
