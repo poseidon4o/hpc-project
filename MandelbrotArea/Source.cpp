@@ -55,6 +55,9 @@ static uint64_t timer_nsec() {
 #endif
 
 
+#define FMA_ENABLED
+
+
 using namespace std;
 
 const int maxIter = 4000;
@@ -73,8 +76,12 @@ int isInsideD(double * const __restrict cx, double * const __restrict cy) {
 	int resMask = 0;
 
 	for (int c = 0; c < maxIter; ++c) {
+#ifdef FMA_ENABLED
+		const __m256d fmad_x_c_re = _mm256_fmadd_pd(x, x, c_re);
+#else
 		const __m256d d_x = _mm256_mul_pd(x, x);
 		const __m256d fmad_x_c_re = _mm256_add_pd(d_x, c_re);
+#endif
 		const __m256d m_yy = _mm256_mul_pd(y, y);
 		__m256d newX = _mm256_sub_pd(fmad_x_c_re, m_yy);
 		// float x_new = x*x - y*y + c_re;
@@ -87,8 +94,12 @@ int isInsideD(double * const __restrict cx, double * const __restrict cy) {
 		x = newX;
 
 		const __m256d m_yy2 = _mm256_mul_pd(y, y);
+#ifdef FMA_ENABLED
+		const __m256d fmad_x_m_yy2 = _mm256_fmadd_pd(x, x, m_yy2);
+#else
 		const __m256d d_x2 = _mm256_mul_pd(x, x);
 		const __m256d fmad_x_m_yy2 = _mm256_add_pd(d_x2, m_yy2);
+#endif
 
 		const __m256d out = _mm256_cmp_pd(fmad_x_m_yy2, q_vec, _CMP_GT_OS);
 		result = _mm256_or_pd(result, out);
@@ -117,8 +128,12 @@ int isInside(float * const  __restrict cx, float * const  __restrict cy) {
 	int resMask = 0;
 
 	for (int c = 0; c < maxIter; ++c) {
+#ifdef FMA_ENABLED
+		const __m256 fmad_x_c_re = _mm256_fmadd_ps(x, x, c_re);
+#else
 		const __m256 d_x = _mm256_mul_ps(x, x);
 		const __m256 fmad_x_c_re = _mm256_add_ps(d_x, c_re);
+#endif
 		const __m256 m_yy = _mm256_mul_ps(y, y);
 		__m256 newX = _mm256_sub_ps(fmad_x_c_re, m_yy);
 		// float x_new = x*x - y*y + c_re;
@@ -131,8 +146,12 @@ int isInside(float * const  __restrict cx, float * const  __restrict cy) {
 		x = newX;
 
 		const __m256 m_yy2 = _mm256_mul_ps(y, y);
+#ifdef FMA_ENABLED
+		const __m256 fmad_x_m_yy2 = _mm256_fmadd_ps(x, x, m_yy2);
+#else
 		const __m256 d_x2 = _mm256_mul_ps(x, x);
 		const __m256 fmad_x_m_yy2 = _mm256_add_ps(d_x2, m_yy2);
+#endif
 
 		const __m256 out = _mm256_cmp_ps(fmad_x_m_yy2, q_vec, _CMP_GT_OS);
 		result = _mm256_or_ps(result, out);
@@ -191,7 +210,7 @@ int main() {
 		}
 		t_end = timer_nsec();
 
-		// printf("batch time: %fms\n", double(t_end - t_start) * 1e-6);
+		printf("batch time: %fms\n", double(t_end - t_start) * 1e-6);
 
 		area = totalArea * (double(in_out[0]) / double(in_out[1]));
 		printf("Total: %f dev %f in[%llu] out[%llu]\n", area, std::abs(expectedArea - area), in_out[1], in_out[0]);
