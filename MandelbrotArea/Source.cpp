@@ -56,7 +56,7 @@ static uint64_t timer_nsec() {
 
 
 #define FMA_ENABLED
-
+#define SSE_RAND
 
 using namespace std;
 
@@ -167,6 +167,61 @@ int isInside(float * const  __restrict cx, float * const  __restrict cy) {
 	return resMask;
 }
 
+
+__declspec(align(16)) static __m128i cur_seed;
+void srand_sse(unsigned int seed) {
+    cur_seed = _mm_set_epi32(seed, seed + 1, seed, seed + 1);
+}
+
+void rand_sse(double * result) {
+    __declspec(align(16)) static const unsigned int mult[4] = { 214013, 17405, 214013, 69069 };
+    __declspec(align(16)) static const unsigned int gadd[4] = { 2531011, 10395331, 13737667, 1 };
+    __declspec(align(16)) static const unsigned int mask[4] = { 0xFFFFFFFF, 0, 0xFFFFFFFF, 0 };
+    __declspec(align(16)) static const unsigned int masklo[4] ={ 0x00007FFF, 0x00007FFF, 0x00007FFF, 0x00007FFF };
+
+    __declspec(align(32)) static const double top[4] = { -10., -10., -10., -10. };
+    __declspec(align(32)) static const double bot[4] = { 10., 10., 10., 10. };
+
+    __m256d d_res = _mm256_cvtepi32_pd(cur_seed);
+    __declspec(align(32)) static const double devs[4] = { 20.0 / (double)UINT_MAX, 20.0 / (double)UINT_MAX, 20.0 / (double)UINT_MAX, 20.0 / (double)UINT_MAX };
+    __declspec(align(32)) static const double shift[4] = { -5., -5., -5., -5. };
+
+    int hi = 0, lo = 0;
+
+    do {
+
+        __declspec(align(16)) __m128i cur_seed_split;
+        __declspec(align(16)) __m128i multiplier;
+        __declspec(align(16)) __m128i adder;
+        __declspec(align(16)) __m128i mod_mask;
+        __declspec(align(16)) __m128i sra_mask;
+
+        adder = _mm_load_si128((__m128i*) gadd);
+        multiplier = _mm_load_si128((__m128i*) mult);
+        mod_mask = _mm_load_si128((__m128i*) mask);
+        sra_mask = _mm_load_si128((__m128i*) masklo);
+        cur_seed_split = _mm_shuffle_epi32(cur_seed, _MM_SHUFFLE(2, 3, 0, 1));
+
+        cur_seed = _mm_mul_epu32(cur_seed, multiplier);
+        multiplier = _mm_shuffle_epi32(multiplier, _MM_SHUFFLE(2, 3, 0, 1));
+        cur_seed_split = _mm_mul_epu32(cur_seed_split, multiplier);
+
+        cur_seed = _mm_and_si128(cur_seed, mod_mask);
+        cur_seed_split = _mm_and_si128(cur_seed_split, mod_mask);
+        cur_seed_split = _mm_shuffle_epi32(cur_seed_split, _MM_SHUFFLE(2, 3, 0, 1));
+        cur_seed = _mm_or_si128(cur_seed, cur_seed_split);
+        cur_seed = _mm_add_epi32(cur_seed, adder);
+
+
+        d_res = _mm256_fmadd_pd(d_res, _mm256_load_pd(devs), _mm256_load_pd(shift));
+        hi = _mm256_movemask_pd(_mm256_cmp_pd(d_res, _mm256_load_pd(top), _CMP_LT_OQ));
+        lo = _mm256_movemask_pd(_mm256_cmp_pd(d_res, _mm256_load_pd(bot), _CMP_GT_OQ));
+    } while (hi != 0 || lo != 0);
+
+    _mm256_store_pd(result, d_res);
+}
+
+
 int main() {
 	const double CxMin=-10;
 	const double CxMax=10;
@@ -190,18 +245,23 @@ int main() {
 	double total = 1e99;
 
 	uint64_t t_start, t_end;
+    srand_sse(42);
 
 	for (;;) {
 
 		t_start = timer_nsec();
 		for (uint64_t c = 0; c < 1 << 20; ++c) {
-			double xs[4], ys[4];
+            __declspec(align(32)) double xs[4], ys[4];
 
+#ifdef SSE_RAND
+            rand_sse(xs);
+            rand_sse(ys);
+#else
 			for (int r = 0; r < 4; ++r) {
 				xs[r] = widthDist(eng);
 				ys[r] = heightDist(eng);
 			}
-
+#endif
 			int res = isInsideD(xs, ys);
 
 			for (int r = 0; r < 4; ++r) {
